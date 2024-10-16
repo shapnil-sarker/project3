@@ -1,0 +1,174 @@
+import UIKit
+import Alamofire
+import AlamofireImage
+
+class PostCell: UITableViewCell {
+
+    @IBOutlet private weak var usernameLabel: UILabel!
+    @IBOutlet private weak var postImageView: UIImageView!
+    @IBOutlet private weak var captionLabel: UILabel!
+    @IBOutlet private weak var dateLabel: UILabel!
+
+    // Blur view to blur out "hidden" posts
+    @IBOutlet private weak var blurView: UIVisualEffectView!
+
+    private var imageDataRequest: DataRequest?
+
+    func configure(with post: Post) {
+        // TODO: Pt 1 - Configure Post Cell
+
+        // Username
+        if let user = post.user {
+            usernameLabel.text = user.username
+        }
+
+        // Image
+        if let imageFile = post.imageFile,
+           let imageUrl = imageFile.url {
+
+            // Use AlamofireImage helper to fetch remote image from URL
+            imageDataRequest = AF.request(imageUrl).responseImage { [weak self] response in
+                switch response.result {
+                case .success(let image):
+                    // Set image view image with fetched image
+                    self?.postImageView.image = image
+                case .failure(let error):
+                    print("❌ Error fetching image: \(error.localizedDescription)")
+                    break
+                }
+            }
+        }
+
+        // Caption
+        captionLabel.text = post.caption
+
+        // Date
+        if let date = post.createdAt {
+            dateLabel.text = DateFormatter.postFormatter.string(from: date)
+        }
+
+        // A lot of the following returns optional values so we'll unwrap them all together in one big `if let`
+        // Get the current user.
+        if let currentUser = User.current,
+
+            // Get the date the user last shared a post (cast to Date).
+           let lastPostedDate = currentUser.lastPostedDate,
+
+            // Get the date the given post was created.
+           let postCreatedDate = post.createdAt,
+
+            // Get the difference in hours between when the given post was created and the current user last posted.
+           let diffHours = Calendar.current.dateComponents([.hour], from: postCreatedDate, to: lastPostedDate).hour {
+
+            // Hide the blur view if the given post was created within 24 hours of the current user's last post. (before or after)
+            blurView.isHidden = abs(diffHours) < 24
+        } else {
+
+            // Default to blur if we can't get or compute the date's above for some reason.
+            blurView.isHidden = false
+        }
+
+
+
+    }
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        // TODO: Pt 1 - Cancel image data request
+
+        // Reset image view image.
+        postImageView.image = nil
+
+        // Cancel image request.
+        imageDataRequest?.cancel()
+    }
+}
+import UIKit
+import ParseSwift
+
+class PhotoUploadViewController: UIViewController, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+
+    @IBOutlet weak var imageView: UIImageView!
+
+    let imagePicker = UIImagePickerController()
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        imagePicker.delegate = self
+        imagePicker.allowsEditing = true // Optional: allows image cropping
+    }
+
+    // MARK: - Choose Image Source (Camera or Photo Library)
+    @IBAction func chooseImageSource(_ sender: UIButton) {
+        let alert = UIAlertController(title: "Choose Photo", message: "Take a new photo or choose from your library", preferredStyle: .actionSheet)
+
+        // Camera option
+        if UIImagePickerController.isSourceTypeAvailable(.camera) {
+            alert.addAction(UIAlertAction(title: "Take Photo", style: .default, handler: { _ in
+                self.imagePicker.sourceType = .camera
+                self.imagePicker.cameraDevice = .rear // Use the back camera
+                self.present(self.imagePicker, animated: true, completion: nil)
+            }))
+        }
+
+        // Photo Library option
+        if UIImagePickerController.isSourceTypeAvailable(.photoLibrary) {
+            alert.addAction(UIAlertAction(title: "Choose from Library", style: .default, handler: { _ in
+                self.imagePicker.sourceType = .photoLibrary
+                self.present(self.imagePicker, animated: true, completion: nil)
+            }))
+        }
+
+        // Cancel option
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel, handler: nil))
+
+        self.present(alert, animated: true, completion: nil)
+    }
+
+    // MARK: - UIImagePickerControllerDelegate Methods
+    func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) {
+
+        if let editedImage = info[.editedImage] as? UIImage {
+            imageView.image = editedImage
+        } else if let originalImage = info[.originalImage] as? UIImage {
+            imageView.image = originalImage
+        }
+
+        dismiss(animated: true, completion: nil)
+    }
+
+    func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+        dismiss(animated: true, completion: nil)
+    }
+
+    // MARK: - Upload Image to Server
+    @IBAction func uploadImage(_ sender: UIButton) {
+        guard let image = imageView.image else {
+            print("No image to upload")
+            return
+        }
+
+        uploadImageToServer(image: image)
+    }
+
+    func uploadImageToServer(image: UIImage) {
+        guard let imageData = image.jpegData(compressionQuality: 0.8) else {
+            print("Could not get JPEG representation of image")
+            return
+        }
+
+        let parseFile = ParseFile(name: "photo.jpg", data: imageData)
+        var post = Post() // Assuming you have a Post object
+
+        post.imageFile = parseFile
+        post.save { result in
+            switch result {
+            case .success(let savedPost):
+                print("Image uploaded successfully: \(savedPost)")
+            case .failure(let error):
+                print("Error uploading image: \(error.localizedDescription)")
+            }
+        }
+    }
+}
